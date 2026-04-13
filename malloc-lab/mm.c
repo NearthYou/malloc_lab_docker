@@ -87,7 +87,6 @@ int mm_init(void)
     PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));
     PUT(heap_listp + (3 * WSIZE), PACK(0, 1));
     heap_listp += (2 * WSIZE);
-    last_listp = heap_listp;
 
     if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
         return -1;
@@ -206,23 +205,21 @@ static void *first_fit(size_t asize)
 
 static void *next_fit(size_t asize)
 {
-    for(char *bp = last_listp; GET_SIZE(HDRP(bp)) != 0; bp = NEXT_BLKP(bp))
+    char *bp;
+
+    if (last_listp == NULL)
+        last_listp = heap_listp;
+
+    for (bp = last_listp; GET_SIZE(HDRP(bp)) != 0; bp = NEXT_BLKP(bp))
     {
-        if(!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
-        {
-            last_listp = bp;
+        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
             return bp;
-        }
     }
 
-    // 처음부터 다시 순회해야 되는 경우
-    for(char *bp = heap_listp; GET_SIZE(HDRP(bp)) != 0; bp = NEXT_BLKP(bp))
+    for (bp = heap_listp; bp < last_listp; bp = NEXT_BLKP(bp))
     {
-        if(!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
-        {
-            last_listp = bp;
+        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
             return bp;
-        }
     }
     
     return NULL;
