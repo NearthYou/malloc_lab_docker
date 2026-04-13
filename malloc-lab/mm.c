@@ -206,9 +206,7 @@ static void *first_fit(size_t asize)
 
 static void *next_fit(size_t asize)
 {
-    char* bp;
-
-    for(*bp = last_listp; GET_SIZE(HDRP(bp)) != 0; bp = NEXT_BLKP(bp))
+    for(char *bp = last_listp; GET_SIZE(HDRP(bp)) != 0; bp = NEXT_BLKP(bp))
     {
         if(!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
         {
@@ -218,7 +216,7 @@ static void *next_fit(size_t asize)
     }
 
     // 처음부터 다시 순회해야 되는 경우
-    for(*bp = heap_listp; GET_SIZE(HDRP(bp)) != 0; bp = NEXT_BLKP(bp))
+    for(char *bp = heap_listp; GET_SIZE(HDRP(bp)) != 0; bp = NEXT_BLKP(bp))
     {
         if(!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
         {
