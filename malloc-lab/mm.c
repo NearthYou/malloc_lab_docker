@@ -229,6 +229,27 @@ static void *next_fit(size_t asize)
     return NULL;
 }
 
+static void *best_fit(size_t asize)
+{
+    void *best = NULL;
+    size_t min_size = asize;
+    for(char *bp = heap_listp; GET_SIZE(HDRP(bp)) != 0; bp = NEXT_BLKP(bp))
+    {
+        if(!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
+        {
+           // GET_SIZE(HDRP(bp)) - asize 가 최소인 경우 
+           // 해당 bp 저장
+           size_t sub = GET_SIZE(HDRP(bp)) - asize;
+           if (sub < min_size){
+            min_size = sub;
+            best = bp;
+           }
+        }
+    }
+
+    return best;
+}
+
 // 찾은 free block 안에 allocated block을 배치하고, 남는 부분이 충분히 크면 split
 static void place(void *bp, size_t asize)
 {
