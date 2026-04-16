@@ -139,7 +139,7 @@ void *mm_malloc(size_t size)
     if (size == 0)
         return NULL;
 
-    /* * [최소 블록 크기 설정]
+    /*
      * Explicit List에서 Free block은 PRED와 SUCC 포인터(각 8바이트)를 담아야 함.
      * 헤더(4) + 푸터(4) + 포인터(16) = 총 24바이트가 최소 크기.
      * 따라서 size에 헤더+푸터(DSIZE)를 더한 값이 24보다 작으면 24로 고정.
@@ -227,7 +227,7 @@ static void *next_fit(size_t asize)
     char *bp;
 
     if (last_listp == NULL)
-        last_listp = heap_listp;
+        last_listp = explict_listp;
 
     for (bp = last_listp; GET_SIZE(HDRP(bp)) != 0; bp = NEXT_BLKP(bp))
     {
@@ -235,7 +235,7 @@ static void *next_fit(size_t asize)
             return bp;
     }
 
-    for (bp = heap_listp; bp < last_listp; bp = NEXT_BLKP(bp))
+    for (bp = explict_listp; bp < last_listp; bp = NEXT_BLKP(bp))
     {
         if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
             return bp;
@@ -248,7 +248,7 @@ static void *best_fit(size_t asize)
 {
     char *best = NULL;
     size_t min_size = (size_t) -1;
-    for (char *bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp))
+    for (char *bp = explict_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp))
     {
         if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
         {
