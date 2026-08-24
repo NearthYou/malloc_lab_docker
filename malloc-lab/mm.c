@@ -1,13 +1,7 @@
 /*
- * mm-naive.c - The fastest, least memory-efficient malloc package.
- *
- * In this naive approach, a block is allocated by simply incrementing
- * the brk pointer.  A block is pure payload. There are no headers or
- * footers.  Blocks are never coalesced or reused. Realloc is
- * implemented directly using mm_malloc and mm_free.
- *
- * NOTE TO STUDENTS: Replace this header comment with your own header
- * comment that gives a high level description of your solution.
+ * Explicit free-list allocator with boundary-tag coalescing.
+ * Free blocks store predecessor and successor pointers in their payload.
+ * Realloc first tries to grow into adjacent free blocks before moving data.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,11 +18,11 @@
  ********************************************************/
 team_t team = {
     /* Team name */
-    "ateam",
+    "NearthYou",
     /* First member's full name */
-    "Harry Bovik",
+    "Siwon",
     /* First member's email address */
-    "bovik@cs.cmu.edu",
+    "96858320+NearthYou@users.noreply.github.com",
     /* Second member's full name (leave blank if none) */
     "",
     /* Second member's email address (leave blank if none) */
@@ -295,7 +289,7 @@ static void place(void *bp, size_t asize)
 }
 
 /*
- * mm_free - Freeing a block does nothing.
+ * mm_free - Mark a block free and merge adjacent free blocks.
  */
 void mm_free(void *ptr)
 {
@@ -307,7 +301,7 @@ void mm_free(void *ptr)
 }
 
 /*
- * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
+ * mm_realloc - Grow in place when adjacent space is available.
  */
 void *mm_realloc(void *ptr, size_t size)
 {

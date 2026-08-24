@@ -1,102 +1,100 @@
-# 📘 Docker + VSCode DevContainer 기반 C 개발 환경 구축 가이드 (MallocLab)
+# MemoryAllocator
 
-이 문서는 **Windows**와 **macOS** 사용자가 Docker와 VSCode DevContainer 기능을 활용하여 C 개발 및 디버깅 환경을 빠르게 구축할 수 있도록 도와줍니다.
+`malloc`, `free`, `realloc`의 핵심 동작을 C로 구현한 동적 메모리 할당기입니다. boundary tag와 explicit free list를 이용해 빈 block을 재사용하고 인접한 공간을 합칩니다.
 
-[**주의**] 기존 차수와 다른 점만 확인하시면 4장부터 6장만 확인하시면 됩니다.
+## 시작한 이유
 
----
+동적 할당을 library 호출로만 사용하지 않고 heap block이 어떻게 나뉘고 다시 합쳐지는지 이해하려고 시작했습니다. 크래프톤 정글 Malloc Lab trace를 실행하며 공간 활용률과 처리량을 함께 비교했습니다.
 
-## 1. Docker란 무엇인가요?
+## 구현 범위
 
-**Docker**는 애플리케이션을 어떤 컴퓨터에서든 **동일한 환경에서 실행**할 수 있게 도와주는 **가상화 플랫폼**입니다.  
+| 영역 | 구현 |
+| --- | --- |
+| Block metadata | header와 footer에 size와 allocation bit 저장 |
+| Free list | payload 안의 predecessor와 successor pointer |
+| Allocation | first fit과 최소 block 크기 기반 split |
+| Free | 네 가지 인접 상태를 처리하는 coalescing |
+| Realloc | 다음 block, 이전 block, 새 block 순서로 확장 시도 |
+| Heap growth | 4KB chunk 단위 확장 |
 
-Docker는 다음 구성요소로 이루어져 있습니다:
+## 아키텍처와 코드 구조
 
-- **Docker Engine**: 컨테이너를 실행하는 핵심 서비스
-- **Docker Image**: 컨테이너 생성에 사용되는 템플릿 (레시피 📃)
-- **Docker Container**: 이미지를 기반으로 생성된 실제 실행 환경 (요리 🍜)
+```mermaid
+flowchart LR
+    REQUEST[allocation request] --> ALIGN[8-byte alignment]
+    ALIGN --> FIND[explicit free list 탐색]
+    FIND -->|적합한 block| PLACE[배치와 split]
+    FIND -->|없음| EXTEND[heap 확장]
+    EXTEND --> MERGE[coalescing]
+    MERGE --> PLACE
+    FREE[free] --> MERGE
+```
 
-### ✅ AWS EC2와의 차이점
+```text
+allocated block
+[ header | payload | footer ]
 
-| 구분 | EC2 같은 VM | Docker 컨테이너 |
-|------|-------------|-----------------|
-| 실행 단위 | OS 포함 전체 | 애플리케이션 단위 |
-| 실행 속도 | 느림 (수십 초 이상) | 매우 빠름 (거의 즉시) |
-| 리소스 사용 | 무거움 | 가벼움 |
+free block
+[ header | predecessor | successor | free space | footer ]
+```
 
----
+핵심 구현은 `malloc-lab/mm.c`에 있습니다. `mdriver`는 trace별 correctness, utilization, throughput을 측정합니다.
 
-## 2. VSCode DevContainer란 무엇인가요?
+## 문제 해결 과정
 
-**DevContainer**는 VSCode에서 Docker 컨테이너를 **개발 환경**처럼 사용할 수 있게 해주는 기능입니다.
+### 64-bit pointer가 겹치지 않는 최소 block 크기
 
-- 코드를 실행하거나 디버깅할 때 **컨테이너 내부 환경에서 동작**
-- 팀원 간 **환경 차이 없이 동일한 개발 환경 구성** 가능
-- `.devcontainer` 폴더에 정의된 설정을 VSCode가 읽어 자동 구성
+header와 footer는 4 byte지만 free list pointer는 64-bit 환경에서 8 byte입니다. successor 위치를 word size만큼 이동하면 predecessor와 memory가 겹쳐 list가 깨졌습니다.
 
----
+pointer 간격은 `sizeof(void *)`로 계산하고, free block의 최소 크기는 header, footer, 두 pointer가 모두 들어가는 24 byte로 정했습니다. split 뒤 남는 공간도 이 크기 이상일 때만 새 free block으로 만듭니다.
 
-## 3. Docker Desktop 설치하기
+### coalescing과 free list 연결을 함께 갱신
 
-1. Docker 공식 사이트에서 설치 파일 다운로드:  
-   👉 [https://www.docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop)
+인접 block을 합치면서 기존 node를 list에 남겨 두면 같은 memory가 여러 번 탐색됩니다. 이전과 다음 block의 allocation 상태를 네 가지 경우로 나누고, 합칠 이웃을 list에서 먼저 제거했습니다.
 
-2. 설치 후 Docker Desktop 실행  
-   - Windows: Docker 아이콘이 트레이에 떠야 함  
-   - macOS: 상단 메뉴바에 Docker 아이콘 확인
+새 header와 footer를 기록한 뒤 합쳐진 block 하나만 list 앞에 다시 넣어 heap 구조와 free list가 같은 상태를 가리키게 했습니다.
 
----
+### realloc에서 가능한 한 기존 pointer 유지
 
-## 4. 프로젝트 파일 다운로드 (히스토리 없이)
+항상 새 block을 할당해 복사하면 큰 payload에서 비용이 커집니다. 현재 block 뒤가 비어 있고 필요한 크기를 만족하면 다음 block을 흡수해 pointer를 유지했습니다.
 
-터미널(CMD, PowerShell, zsh 등)에서 아래 명령어로 프로젝트 폴더만 내려받습니다:
+앞 block까지 사용해야 할 때는 free list에서 먼저 제거한 뒤 `memmove`로 payload를 옮겼습니다. pointer metadata를 덮어쓴 뒤 list에서 제거하면 손상된 주소를 읽게 되므로 순서를 분리했습니다.
+
+### split 뒤 남은 공간의 재사용
+
+요청보다 큰 free block을 전부 할당하면 외부 단편화는 줄어도 내부 낭비가 커집니다. 남은 공간이 최소 free block 크기 이상일 때만 block을 나누고, 나머지를 즉시 free list에 연결했습니다.
+
+## 실행 방법
+
+GCC와 Make가 있는 Linux 환경에서 실행합니다.
 
 ```bash
-git clone --depth=1 https://github.com/krafton-jungle/malloc_lab_docker.git
+cd malloc-lab
+make clean
+make
+./mdriver -V
 ```
 
-- `--depth=1` 옵션은 git commit 히스토리를 생략하고 **최신 파일만 가져옵니다.**
+VS Code DevContainer를 열면 같은 compiler와 debugger 설정을 사용할 수 있습니다.
 
-### 📂 다운로드 후 폴더 구조 설명
+## 테스트
 
-```
-malloc_lab_docker/
-├── .devcontainer/
-│   ├── devcontainer.json      # VSCode에서 컨테이너 환경 설정
-│   └── Dockerfile             # C 개발 환경 이미지 정의
-│
-├── .vscode/
-│   ├── launch.json            # 디버깅 설정 (F5 실행용)
-│   └── tasks.json             # 컴파일 자동화 설정
-│
-├── malloc-lab
-│   ├── short1-bal.rep          # 테스트 케이스
-│   ├── Makefile                # 과제를 컴파일하고 테스트하기 위한 파일
-│   └── README.md               # malloc-lab 과제 설명
-│
-└── README.md  # 설치 및 사용법 설명 문서
-```
+2026년 8월 24일 Docker `gcc:14`에서 기본 trace 11개를 실행했습니다.
 
----
+| 항목 | 결과 |
+| --- | ---: |
+| correctness | 11개 trace 모두 valid |
+| 평균 utilization | 72% |
+| 처리량 | 4,906 Kops |
+| performance index | 83/100 |
 
-## 5. VSCode에서 해당 프로젝트 폴더 열기
+## 남은 과제
 
-1. VSCode를 실행
-2. `파일 → 폴더 열기`로 방금 클론한 `malloc_lab_docker` 폴더를 선택
+- 사용하지 않는 next fit과 best fit 구현 정리 또는 전략 비교 연결
+- heap invariant를 검사하는 `mm_checkheap` 추가
+- size class별 segregated free list와 현재 first fit 비교
 
----
+## 관련 프로젝트
 
-## 6. 개발 컨테이너: 컨테이너에서 열기
-
-1. VSCode에서 `Ctrl+Shift+P` (Windows/Linux) 또는 `Cmd+Shift+P` (macOS)를 누릅니다.
-2. 명령어 팔레트에서 `Dev Containers: Reopen in Container`를 선택합니다.
-3. 이후 컨테이너가 자동으로 실행되고 빌드됩니다. 처음 컨테이너를 열면 빌드하는 시간이 오래걸릴 수 있습니다. 빌드 후, 프로젝트가 **컨테이너 안에서 실행됨**.
-
----
-
-## 7. C 파일에 브레이크포인트 설정 후 디버깅 (F5)
-
-이제 본격적으로 문제를 풀 시간입니다. `malloc-lab/README.md` 파일을 참조하셔서 rbtree 문제를 풀어보세요.
-
-C 언어로 문제를 풀다가 디버깅이 필요하시면 소스코드에 BreakPoint를 설정한 뒤에 키보드에서 `F5`를 눌러 디버깅을 시작할 수 있습니다.`F5`를 누르면 `malloc-lab`폴더에서 `mdriver -V -f short1-bal.rep` 를 실행하여 테스트 코드를 디버깅 모드로 실행합니다.
-- 참고로 변수, 메모리, 스택, 출력 등을 VSCode에서 확인할 수도 있습니다.
+- [CDataStructures](https://github.com/NearthYou/CDataStructures): linked list와 tree pointer 연산 연습
+- [TinyWebServer](https://github.com/NearthYou/TinyWebServer): C socket과 process 기반 web server
